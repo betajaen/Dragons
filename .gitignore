@@ -1,0 +1,15 @@
+*.exe
+*.dll
+*.sln
+*.vcxproj
+*.filters
+*.user
+*.res
+
+.vs
+ref
+bin/
+obj/
+_build/
+
+genie.exe
