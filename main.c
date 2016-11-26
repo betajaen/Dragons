@@ -27,6 +27,7 @@ static Bitmap         SPRITESHEET_REPTILE[2];
 static Bitmap         SPRITESHEET_TOOL;
 static Bitmap         SPRITESHEET_WALLS;
 static Bitmap         SPRITESHEET_FLOORS;
+static Bitmap         SPRITESHEET_POTION;
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -47,11 +48,14 @@ typedef enum
   AC_DOWN,
   AC_LEFT,
   AC_RIGHT,
-  AC_WAIT
+  AC_WAIT,
+  AC_USE
 } Actions;
 
 u32 randr(u32 min, u32 max)
 {
+  if (min == max)
+    return min;
   double scaled = (double)rand()/RAND_MAX;
   return (u32) ((max - min + 1)*scaled + min);
 }
@@ -164,6 +168,7 @@ void Init(Settings* settings)
   Input_BindKey(SDL_SCANCODE_A, AC_LEFT);
   Input_BindKey(SDL_SCANCODE_D, AC_RIGHT);
   Input_BindKey(SDL_SCANCODE_R, AC_WAIT);
+  Input_BindKey(SDL_SCANCODE_SPACE, AC_USE);
 
   Font_Load("NeoSans.png", &FONT_NEOSANS, Colour_Make(0,0,255), Colour_Make(255,0,255));
   Bitmap_Load("Humanoid0.png", &SPRITESHEET_HUMANOID[0], 0);
@@ -173,7 +178,7 @@ void Init(Settings* settings)
   Bitmap_Load("Wall.png", &SPRITESHEET_WALLS, 0);
   Bitmap_Load("Floor.png", &SPRITESHEET_FLOORS, 0);
   Bitmap_Load("Tool.png", &SPRITESHEET_TOOL, 0);
-
+  Bitmap_Load("Potion.png", &SPRITESHEET_POTION, 0);
   LoadSectionData();
 }
 
@@ -245,6 +250,7 @@ typedef struct
   Object objects[MAX_MONSTERS];
   u32    nbObjects;
   u32    section;
+  u8     potion;
 } Game;
 
 Game*      GAME;
@@ -259,7 +265,8 @@ enum
   OT_EarthDragon,
   OT_AirDragon,
   OT_Egg,
-  OT_BrokenEgg
+  OT_UsedObject,
+  OT_Potion_Slow
 };
 
 bool CanCollide(u32 x, u32 y)
@@ -291,12 +298,13 @@ Bitmap* Object_GetBitmap(u8 type)
 {
   switch(type)
   {
-    case OT_Human:       return &SPRITESHEET_HUMANOID[AnimationTimer % 2];
-    case OT_FireDragon:  return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_WaterDragon: return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_EarthDragon: return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_AirDragon:   return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_Egg:         return &SPRITESHEET_TOOL;
+    case OT_Human:          return &SPRITESHEET_HUMANOID[AnimationTimer % 2];
+    case OT_FireDragon:     return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_WaterDragon:    return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_EarthDragon:    return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_AirDragon:      return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_Egg:            return &SPRITESHEET_TOOL;
+    case OT_Potion_Slow:    return &SPRITESHEET_POTION;
   }
   return 0;
 }
@@ -312,7 +320,8 @@ void Object_GetSpriteTileIndex(u8 type, XY* xy)
     case OT_EarthDragon: xy->x = 5; xy->y = 2; return;
     case OT_AirDragon:   xy->x = 3; xy->y = 2; return;
     case OT_Egg:         xy->x = 1; xy->y = 0; return;
-    case OT_BrokenEgg:   return;
+    case OT_Potion_Slow: xy->x = 0; xy->y = 0; return;
+    case OT_UsedObject:   return;
   }
 }
 
@@ -325,26 +334,19 @@ u32 Object_MoveSpeed(u8 type)
     case OT_WaterDragon: return 3;
     case OT_EarthDragon: return 3;
     case OT_AirDragon:   return 2;
-    case OT_Egg:         return UINT32_MAX;
-    case OT_BrokenEgg:   return UINT32_MAX;
   }
-  return 0;
+  return UINT32_MAX;
 }
 
 u32 Object_MaxActionTime(u8 type)
 {
   switch(type)
   {
-    case OT_Human:       return UINT32_MAX / 2;
-    case OT_FireDragon:  return UINT32_MAX / 2;
-    case OT_WaterDragon: return UINT32_MAX / 2;
-    case OT_EarthDragon: return UINT32_MAX / 2;
-    case OT_AirDragon:   return UINT32_MAX / 2;
-    case OT_Egg:         return 6;
-    case OT_BrokenEgg:   return UINT32_MAX / 2;
+    case OT_Egg:           return 6;
   }
-  return 0;
+  return UINT32_MAX / 2;;
 }
+
 void Object_Draw(Object* object)
 {
   Bitmap* bitmap = Object_GetBitmap(object->type);
@@ -375,15 +377,28 @@ void Player_New(u32 x, u32 y)
   player->y = y;
 }
 
-void Monster_New(u8 type, u32 x, u32 y)
+void Object_New(u8 type, u32 x, u32 y)
 {
-  Object* monster = &GAME->objects[GAME->nbObjects++];
-  monster->type = type;
-  monster->health = 1;
-  monster->moveTime = Object_MoveSpeed(type);
-  monster->actionTime = Object_MaxActionTime(type) + randr(1, 10);
-  monster->x = x;
-  monster->y = y;
+  Object* object = &GAME->objects[GAME->nbObjects++];
+  object->type = type;
+  object->health = 1;
+  object->moveTime = Object_MoveSpeed(type);
+  object->actionTime = Object_MaxActionTime(type) + randr(1, 10);
+  object->x = x;
+  object->y = y;
+}
+
+bool Object_CanPassthrough(u8 type)
+{
+
+  switch(type)
+  {
+    case OT_Egg:          return true;
+    case OT_UsedObject:   return true;
+    case OT_Potion_Slow:  return true;
+  }
+
+  return false;
 }
 
 bool TestBounds(s32 tx, s32 ty)
@@ -453,13 +468,22 @@ bool Object_Tick(Object* object)
           continue;
 
         bool otherIsPlayer = (other == &GAME->player);
-        bool otherIsEgg    = (other->type == OT_Egg || other->type == OT_BrokenEgg);
+        bool otherIsPassThrough    = Object_CanPassthrough(other->type);
       
         if (other->x == tx && other->y == ty)
         {
-          if (isPlayer && otherIsEgg)
+          if (isPlayer && otherIsPassThrough)
           {
-            other->type = OT_BrokenEgg;
+            switch(other->type)
+            {
+              case OT_Egg:
+                other->type = OT_UsedObject;
+              break;
+              case OT_Potion_Slow:
+                GAME->potion = OT_Potion_Slow;
+                other->type = OT_UsedObject;
+              break;
+            }
             canMove = true;
           }
           else if (!otherIsPlayer)
@@ -512,17 +536,31 @@ void RestartLevel()
 
   Player_New(SECTION_WIDTH / 2, SECTION_HEIGHT / 2);
 
-  u32 capacity = randr(4, 6);
-  while(capacity)
+  u32 eggCapacity = randr(4, 6);
+  while(eggCapacity)
   {
     u32 x = randr(0, SECTION_WIDTH - 1);
     u32 y = randr(0, SECTION_HEIGHT - 1);
     if (!CanCollide(x, y))
     {
-      Monster_New(OT_Egg, x, y);
-      capacity--;
+      Object_New(OT_Egg, x, y);
+      eggCapacity--;
     }
   }
+
+  u32 potionCapacity = randr(1, 3);
+
+  while(potionCapacity)
+  {
+    u32 x = randr(0, SECTION_WIDTH - 1);
+    u32 y = randr(0, SECTION_HEIGHT - 1);
+    if (!CanCollide(x, y))
+    {
+      Object_New(randr(OT_Potion_Slow, OT_Potion_Slow), x, y);
+      potionCapacity--;
+    }
+  }
+
 }
 
 void Start()
@@ -566,6 +604,35 @@ void Step()
     GAME->player.dY = 0;
     move = true;
     wait = true;
+  }
+
+  if (Input_GetActionReleased(AC_USE) && GAME->potion != 0)
+  {
+    GAME->player.dX = 0;
+    GAME->player.dY = 0;
+    move = true;
+    wait = false;
+
+    switch(GAME->potion)
+    {
+      case OT_Potion_Slow:
+      {
+        for(u32 i=0; i < GAME->nbObjects;i++)
+        {
+          Object* obj = &GAME->objects[i];
+          int dx = (obj->x - GAME->player.x);
+          int dy = (obj->y - GAME->player.y);
+          
+          if ((dx * dx) + (dy * dy) < (7 * 7) && Object_IsDragon(obj->type))
+          {
+            obj->moveTime += 6;
+          }
+        }
+      }
+      break;
+    }
+
+    GAME->potion = 0;
   }
 
   Section_Draw(0);
@@ -625,6 +692,18 @@ void Step()
   for(u32 i=0; i < GAME->nbObjects;i++)
   {
     Object_Draw(&GAME->objects[i]);
+  }
+
+
+  if (GAME->potion != 0)
+  {
+    XY xy;
+    Object_GetSpriteTileIndex(GAME->potion, &xy);
+    Bitmap* bitmap = Object_GetBitmap(GAME->potion);
+    if (bitmap != NULL)
+    {
+      Tile_Draw(bitmap, 0, 0,  xy.x, xy.y);
+    }
   }
 
 }
