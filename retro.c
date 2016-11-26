@@ -767,6 +767,7 @@ U8* Arena_Obtain(U32 size)
   assert(gArena.current + size < gArena.end); // Ensure can fit.
   U8* mem = gArena.current;
   gArena.current += size;
+  memset(mem, 0, size);
   return mem;
 }
 

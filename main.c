@@ -5,13 +5,16 @@
 #define RETRO_CANVAS_DEFAULT_WIDTH (RETRO_WINDOW_DEFAULT_WIDTH / 2)
 #define RETRO_CANVAS_DEFAULT_HEIGHT (RETRO_WINDOW_DEFAULT_HEIGHT / 2)
 
-#define SECTION_WIDTH 22  //(RETRO_CANVAS_DEFAULT_WIDTH / TILE_SIZE)
-#define SECTION_HEIGHT 15 //(RETRO_CANVAS_DEFAULT_HEIGHT / TILE_SIZE)
+#define TILE_SIZE 16
+#define SECTION_WIDTH   (RETRO_CANVAS_DEFAULT_WIDTH / TILE_SIZE)
+#define SECTION_HEIGHT  (RETRO_CANVAS_DEFAULT_HEIGHT / TILE_SIZE)
 
 #define LEVEL_WIDTH (SECTION_WIDTH * 2)
 #define LEVEL_HEIGHT (SECTION_HEIGHT)
 #define MAX_OBJECTS_PER_SECTION 16
 #define SECTIONS_PER_LEVEL (4)
+
+#define MAX_MONSTERS 256
 
 
 #define VERSION "1.0"
@@ -20,6 +23,8 @@
 
 static Font           FONT_NEOSANS;
 static Bitmap         SPRITESHEET;
+static Bitmap         SPRITESHEET_HUMANOID[2];
+static Bitmap         SPRITESHEET_REPTILE[2];
 static Bitmap         CATSHEET;
 static Bitmap         PLAYERSHEET;
 static Bitmap         COCO;
@@ -44,34 +49,54 @@ static Bitmap         TILES1;
 
 
 typedef uint8_t u8;
-typedef uint8_t u16;
-typedef uint8_t u32;
-typedef uint8_t u64;
-typedef uint8_t s8;
-typedef uint8_t s16;
-typedef uint8_t s32;
-typedef uint8_t s64;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+
+static u32 FrameCount     = 0;
+static u32 AnimationTimer = 0;
 
 typedef enum 
 {
-  AC_ACTION,
-  AC_MUSIC,
-  AC_RESET
+  AC_QUIT,
+  AC_UP,
+  AC_DOWN,
+  AC_LEFT,
+  AC_RIGHT
 } Actions;
+
+unsigned int
+randr(unsigned int min, unsigned int max)
+{
+  double scaled = (double)rand()/RAND_MAX;
+
+  return (max - min +1)*scaled + min;
+}
 
 void Init(Settings* settings)
 {
   Palette_Make(&settings->palette);
   Palette_LoadFromBitmap("palette.png", &settings->palette);
 
-  Input_BindKey(SDL_SCANCODE_SPACE, AC_ACTION);
-  Input_BindKey(SDL_SCANCODE_M, AC_MUSIC);
+  Input_BindKey(SDL_SCANCODE_ESCAPE, AC_QUIT);
+  Input_BindKey(SDL_SCANCODE_W, AC_UP);
+  Input_BindKey(SDL_SCANCODE_S, AC_DOWN);
+  Input_BindKey(SDL_SCANCODE_A, AC_LEFT);
+  Input_BindKey(SDL_SCANCODE_D, AC_RIGHT);
 
   Font_Load("NeoSans.png", &FONT_NEOSANS, Colour_Make(0,0,255), Colour_Make(255,0,255));
   Bitmap_Load("cave.png", &SPRITESHEET, 0);
   Bitmap_Load("cats.png", &CATSHEET, 16);
   Bitmap_Load("player.png", &PLAYERSHEET, 16);
   Bitmap_Load("coco.png", &COCO, 255);
+  Bitmap_Load("Humanoid0.png", &SPRITESHEET_HUMANOID[0], 0);
+  Bitmap_Load("Humanoid1.png", &SPRITESHEET_HUMANOID[1], 0);
+  Bitmap_Load("Reptile0.png", &SPRITESHEET_REPTILE[0], 0);
+  Bitmap_Load("Reptile1.png", &SPRITESHEET_REPTILE[1], 0);
 
   Animation_LoadHorizontal(&ANIMATEDSPRITE_PLAYER_IDLE, &PLAYERSHEET, 1, 100, 0, 0, 46, 50);
   Animation_LoadHorizontal(&ANIMATEDSPRITE_PLAYER_WALK, &PLAYERSHEET, 8, 120, 0, 150, 46, 50);
@@ -97,54 +122,214 @@ void Init(Settings* settings)
 
 }
 
-void Splat_Tile(Bitmap* bitmap, S32 x, S32 y, S32 s, U32 index)
+void Tile_Draw(Bitmap* bitmap, S32 x, S32 y, U32 ox, U32 oy)
 {
   SDL_Rect src, dst;
   
-
-  if (index == 0)
-  {
-    src.x = 0;
-    src.y = 0;
-  }
-  else
-  {
-    src.x = (index % 16) * s;
-    src.y = (index / 16) * s;
-  }
-
-  src.w = s;
-  src.h = s;
+  src.x = ox * TILE_SIZE;
+  src.y = oy * TILE_SIZE;
+  
+  src.w = TILE_SIZE;
+  src.h = TILE_SIZE;
 
   dst.x = x;
   dst.y = y;
-  dst.w = s;
-  dst.h = s;
+  dst.w = TILE_SIZE;
+  dst.h = TILE_SIZE;
 
   Canvas_Splat3(bitmap, &dst, &src);
 }
 
-typedef enum
+typedef struct
 {
-  PF_Idle,
-  PF_Walking
-} PlayerState;
+  s32 x, y;
+} XY;
 
 typedef struct
 {
-    u32 x, y;
+  s32 x, y;
+  u8  type;
+  u8  health;
+  u8  moveTime;
+} Object;
+
+typedef struct
+{
+  Object player;
+  Object objects[MAX_MONSTERS];
+  u32    nbObjects;
 } Game;
 
 Game*      GAME;
 bool       STEP_MODE;
 
+enum 
+{
+  OT_None,
+  OT_Human,
+  OT_FireDragon,
+  OT_WaterDragon,
+  OT_EarthDragon,
+  OT_AirDragon,
+};
+
+Bitmap* Object_GetBitmap(u8 type)
+{
+  switch(type)
+  {
+    case OT_Human:       return &SPRITESHEET_HUMANOID[AnimationTimer % 2];
+    case OT_FireDragon:  return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_WaterDragon: return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_EarthDragon: return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_AirDragon:  return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+  }
+  return 0;
+}
+
+
+void Object_GetSpriteTileIndex(u8 type, XY* xy)
+{
+  switch(type)
+  {
+    case OT_Human:       xy->x = 0; xy->y = 0; return;
+    case OT_FireDragon:  xy->x = 1; xy->y = 3; return;
+    case OT_WaterDragon: xy->x = 4; xy->y = 3; return;
+    case OT_EarthDragon: xy->x = 5; xy->y = 2; return;
+    case OT_AirDragon:   xy->x = 3; xy->y = 2; return;
+  }
+}
+
+void Object_Draw(Object* object)
+{
+  Bitmap* bitmap = Object_GetBitmap(object->type);
+
+  Rect r;
+  r.left    = object->x * TILE_SIZE;
+  r.top     = object->y * TILE_SIZE;
+  r.right   = r.left   + TILE_SIZE;
+  r.bottom  = r.top + TILE_SIZE;
+
+  Canvas_DrawRectangle(2, r);
+  XY xy;
+  Object_GetSpriteTileIndex(object->type, &xy);
+  Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
+}
+
+void Player_New(u32 x, u32 y)
+{
+  Object* player = &GAME->player;
+  player->type = OT_Human;
+  player->health = 1;
+  player->moveTime = 1;
+  player->x = x;
+  player->y = y;
+}
+
+void Monster_New(u8 type, u32 x, u32 y)
+{
+  Object* monster = &GAME->objects[GAME->nbObjects++];
+  monster->type = type;
+  monster->health = 1;
+  monster->moveTime = 1;
+  monster->x = x;
+  monster->y = y;
+}
+
+void RestartLevel()
+{
+  memset(GAME, 0, sizeof(Game));
+
+  Player_New(SECTION_WIDTH / 2, SECTION_HEIGHT / 2);
+
+  for(int i=0;i < 4;i++)
+  {
+    Monster_New(OT_FireDragon, randr(0, SECTION_WIDTH - 1), randr(0, SECTION_HEIGHT - 1));
+  }
+  for(int i=0;i < 4;i++)
+  {
+    Monster_New(OT_WaterDragon, randr(0, SECTION_WIDTH - 1), randr(0, SECTION_HEIGHT - 1));
+  }
+  for(int i=0;i < 4;i++)
+  {
+    Monster_New(OT_EarthDragon, randr(0, SECTION_WIDTH - 1), randr(0, SECTION_HEIGHT - 1));
+  }
+  for(int i=0;i < 4;i++)
+  {
+    Monster_New(OT_AirDragon, randr(0, SECTION_WIDTH - 1), randr(0, SECTION_HEIGHT - 1));
+  }
+}
+
 void Start()
 {
   GAME = Scope_New(Game);
-  Canvas_SetFlags(0, CNF_Render | CNF_Clear, 8);
-  Scope_Push('COCO');
+  Canvas_SetFlags(0, CNF_Render | CNF_Clear, 0);
+  Scope_Push('LEVL');
+  RestartLevel();
 }
+
 
 void Step()
 {
+  bool move = false;
+
+  if (Input_GetActionReleased(AC_UP))
+  {
+    GAME->player.y--;
+    move = true;
+  }
+  else if (Input_GetActionReleased(AC_DOWN))
+  {
+    GAME->player.y++;
+    move = true;
+  }
+  
+  if (Input_GetActionReleased(AC_LEFT))
+  {
+    GAME->player.x--;
+    move = true;
+  }
+  else if (Input_GetActionReleased(AC_RIGHT))
+  {
+    GAME->player.x++;
+    move = true;
+  }
+
+  if (move)
+  {
+    for(u32 i=0; i < GAME->nbObjects;i++)
+    {
+      Object* obj = &GAME->objects[i];
+      
+      s32 dx = obj->x - GAME->player.x;
+      s32 dy = obj->y - GAME->player.y;
+
+      if (dx > 0)
+        obj->x--;
+      if (dx < 0)
+        obj->x++;
+
+      if (dy > 0)
+        obj->y--;
+      if (dy < 0)
+        obj->y++;
+
+      if (GAME->player.x == obj->x && GAME->player.y == obj->y)
+      {
+        RestartLevel();
+        return;
+      }
+
+    }
+  }
+
+  FrameCount++;
+  AnimationTimer += (FrameCount % 10 == 0 ? 1 : 0);
+  Object_Draw(&GAME->player);
+  for(u32 i=0; i < GAME->nbObjects;i++)
+  {
+    Object_Draw(&GAME->objects[i]);
+  }
+
+
+
 }
