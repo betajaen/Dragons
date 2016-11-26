@@ -236,6 +236,7 @@ typedef struct
   u8  health;
   u8  moveTime;
   u8  actionTime;
+  u8  noMove;
 } Object;
 
 typedef struct
@@ -278,10 +279,10 @@ bool Object_IsDragon(u8 type)
 {
   switch(type)
   {
-    case OT_FireDragon:  
-    case OT_WaterDragon: 
-    case OT_EarthDragon: 
-    case OT_AirDragon:   return true;
+    case OT_FireDragon:
+    case OT_WaterDragon:
+    case OT_EarthDragon:
+    case OT_AirDragon:      return true;
   }
   return false;
 }
@@ -360,6 +361,7 @@ void Object_Draw(Object* object)
   XY xy;
   Object_GetSpriteTileIndex(object->type, &xy);
   Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
+  Canvas_PrintF(object->x * TILE_SIZE, object->y * TILE_SIZE, &FONT_NEOSANS, 1, "%i", object->noMove);
 }
 
 void Player_New(u32 x, u32 y)
@@ -451,7 +453,7 @@ bool Object_Tick(Object* object)
           continue;
 
         bool otherIsPlayer = (other == &GAME->player);
-        bool otherIsEgg    = (other->type == OT_Egg);
+        bool otherIsEgg    = (other->type == OT_Egg || other->type == OT_BrokenEgg);
       
         if (other->x == tx && other->y == ty)
         {
@@ -471,6 +473,10 @@ bool Object_Tick(Object* object)
       object->x = tx;
       object->y = ty;
       object->moveTime = Object_MoveSpeed(object->type) - 1;
+    }
+    else
+    {
+      object->noMove++;
     }
   }
   else
@@ -577,20 +583,29 @@ void Step()
         int dx = (obj->x - GAME->player.x);
         int dy = (obj->y - GAME->player.y);
 
-        if (dx > 0)
-          obj->dX = -1;
-        else if (dx < 0)
-          obj->dX = 1;
+        if (obj->noMove >= 3)
+        {
+          obj->noMove = 0;
+          obj->dX = randr(0,2) - 1;
+          obj->dY = randr(0,2) - 1;
+        }
         else
-          obj->dX = 0;
+        {
+          if (dx > 0)
+            obj->dX = -1;
+          else if (dx < 0)
+            obj->dX = 1;
+          else
+            obj->dX = 0;
 
-        if (dy > 0)
-          obj->dY = -1;
-        else if (dy < 0)
-          obj->dY = 1;
-        else
-          obj->dY = 0;
-
+          if (dy > 0)
+            obj->dY = -1;
+          else if (dy < 0)
+            obj->dY = 1;
+          else
+            obj->dY = 0;
+        }
+        
         Object_Tick(obj);
 
         if (GAME->player.x == obj->x && GAME->player.y == obj->y && Object_IsDragon(obj->type))
