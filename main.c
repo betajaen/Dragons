@@ -24,6 +24,7 @@ static Font           FONT_NEOSANS;
 static Bitmap         SPRITESHEET;
 static Bitmap         SPRITESHEET_HUMANOID[2];
 static Bitmap         SPRITESHEET_REPTILE[2];
+static Bitmap         SPRITESHEET_TOOL;
 static Bitmap         SPRITESHEET_WALLS;
 static Bitmap         SPRITESHEET_FLOORS;
 
@@ -171,6 +172,7 @@ void Init(Settings* settings)
   Bitmap_Load("Reptile1.png",  &SPRITESHEET_REPTILE[1], 0);
   Bitmap_Load("Wall.png", &SPRITESHEET_WALLS, 0);
   Bitmap_Load("Floor.png", &SPRITESHEET_FLOORS, 0);
+  Bitmap_Load("Tool.png", &SPRITESHEET_TOOL, 0);
 
   LoadSectionData();
 }
@@ -233,6 +235,7 @@ typedef struct
   u8  type;
   u8  health;
   u8  moveTime;
+  u8  actionTime;
 } Object;
 
 typedef struct
@@ -254,20 +257,33 @@ enum
   OT_WaterDragon,
   OT_EarthDragon,
   OT_AirDragon,
+  OT_Egg,
+  OT_BrokenEgg
 };
 
 bool CanCollide(u32 x, u32 y)
 {
   u32 idx = x + (y * SECTION_WIDTH);
   SectionData* section = &SECTION_DATA[GAME->section];
-  if (section->col[idx])
+  
+  if (section->col[idx] > 0)
   {
     return true;
   }
-  else
+
+  return section->non[idx] < 45;
+}
+
+bool Object_IsDragon(u8 type)
+{
+  switch(type)
   {
-    return section->non[idx] < 45;
+    case OT_FireDragon:  
+    case OT_WaterDragon: 
+    case OT_EarthDragon: 
+    case OT_AirDragon:   return true;
   }
+  return false;
 }
 
 Bitmap* Object_GetBitmap(u8 type)
@@ -279,6 +295,7 @@ Bitmap* Object_GetBitmap(u8 type)
     case OT_WaterDragon: return &SPRITESHEET_REPTILE[AnimationTimer % 2];
     case OT_EarthDragon: return &SPRITESHEET_REPTILE[AnimationTimer % 2];
     case OT_AirDragon:   return &SPRITESHEET_REPTILE[AnimationTimer % 2];
+    case OT_Egg:         return &SPRITESHEET_TOOL;
   }
   return 0;
 }
@@ -293,6 +310,8 @@ void Object_GetSpriteTileIndex(u8 type, XY* xy)
     case OT_WaterDragon: xy->x = 4; xy->y = 3; return;
     case OT_EarthDragon: xy->x = 5; xy->y = 2; return;
     case OT_AirDragon:   xy->x = 3; xy->y = 2; return;
+    case OT_Egg:         xy->x = 1; xy->y = 0; return;
+    case OT_BrokenEgg:   return;
   }
 }
 
@@ -305,21 +324,39 @@ u32 Object_MoveSpeed(u8 type)
     case OT_WaterDragon: return 3;
     case OT_EarthDragon: return 3;
     case OT_AirDragon:   return 2;
+    case OT_Egg:         return UINT32_MAX;
+    case OT_BrokenEgg:   return UINT32_MAX;
   }
   return 0;
 }
 
+u32 Object_MaxActionTime(u8 type)
+{
+  switch(type)
+  {
+    case OT_Human:       return UINT32_MAX / 2;
+    case OT_FireDragon:  return UINT32_MAX / 2;
+    case OT_WaterDragon: return UINT32_MAX / 2;
+    case OT_EarthDragon: return UINT32_MAX / 2;
+    case OT_AirDragon:   return UINT32_MAX / 2;
+    case OT_Egg:         return 6;
+    case OT_BrokenEgg:   return UINT32_MAX / 2;
+  }
+  return 0;
+}
 void Object_Draw(Object* object)
 {
   Bitmap* bitmap = Object_GetBitmap(object->type);
 
+  if (bitmap == NULL)
+    return;
+
   Rect r;
   r.left    = object->x * TILE_SIZE;
   r.top     = object->y * TILE_SIZE;
-  r.right   = r.left   + TILE_SIZE;
-  r.bottom  = r.top + TILE_SIZE;
+  r.right   = r.left    + TILE_SIZE;
+  r.bottom  = r.top     + TILE_SIZE;
 
-//  Canvas_DrawRectangle(2, r);
   XY xy;
   Object_GetSpriteTileIndex(object->type, &xy);
   Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
@@ -331,6 +368,7 @@ void Player_New(u32 x, u32 y)
   player->type = OT_Human;
   player->health = 1;
   player->moveTime = 1;
+  player->actionTime = Object_MaxActionTime(OT_Human) + randr(1, 10);
   player->x = x;
   player->y = y;
 }
@@ -340,7 +378,8 @@ void Monster_New(u8 type, u32 x, u32 y)
   Object* monster = &GAME->objects[GAME->nbObjects++];
   monster->type = type;
   monster->health = 1;
-  monster->moveTime = 1;
+  monster->moveTime = Object_MoveSpeed(type);
+  monster->actionTime = Object_MaxActionTime(type) + randr(1, 10);
   monster->x = x;
   monster->y = y;
 }
@@ -412,12 +451,18 @@ bool Object_Tick(Object* object)
           continue;
 
         bool otherIsPlayer = (other == &GAME->player);
+        bool otherIsEgg    = (other->type == OT_Egg);
       
-        if (other->x == tx && other->y == ty && !otherIsPlayer)
+        if (other->x == tx && other->y == ty)
         {
-          canMove = false;
+          if (isPlayer && otherIsEgg)
+          {
+            other->type = OT_BrokenEgg;
+            canMove = true;
+          }
+          else if (!otherIsPlayer)
+            canMove = false;
         }
-      
       }
     }
 
@@ -433,6 +478,22 @@ bool Object_Tick(Object* object)
     object->moveTime--;
   }
 
+  if (object->actionTime == 0)
+  {
+    switch(object->type)
+    {
+      case OT_Egg:
+        object->type = randr(OT_FireDragon, OT_AirDragon);
+        object->moveTime = Object_MoveSpeed(object->type) - 1;
+      break;
+    }
+    object->actionTime = Object_MaxActionTime(object->type) + randr(1, 10);
+  }
+  else
+  {
+    object->actionTime--;
+  }
+
   object->dX = 0;
   object->dY = 0;
 
@@ -445,16 +506,15 @@ void RestartLevel()
 
   Player_New(SECTION_WIDTH / 2, SECTION_HEIGHT / 2);
 
-  for(u32 d=0;d < 4;d++)
+  u32 capacity = randr(4, 6);
+  while(capacity)
   {
-    for(int i=0;i < 4;i++)
+    u32 x = randr(0, SECTION_WIDTH - 1);
+    u32 y = randr(0, SECTION_HEIGHT - 1);
+    if (!CanCollide(x, y))
     {
-      u32 x = randr(0, SECTION_WIDTH - 1);
-      u32 y = randr(0, SECTION_HEIGHT - 1);
-      if (!CanCollide(x, y))
-      {
-        Monster_New(OT_FireDragon + d, x, y);
-      }
+      Monster_New(OT_Egg, x, y);
+      capacity--;
     }
   }
 }
@@ -533,7 +593,7 @@ void Step()
 
         Object_Tick(obj);
 
-        if (GAME->player.x == obj->x && GAME->player.y == obj->y)
+        if (GAME->player.x == obj->x && GAME->player.y == obj->y && Object_IsDragon(obj->type))
         {
           RestartLevel();
           return;
