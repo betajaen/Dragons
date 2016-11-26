@@ -1,7 +1,7 @@
 #define RETRO_WINDOW_CAPTION "Dragons"
 #define RETRO_ARENA_SIZE Kilobytes(32)
-#define RETRO_WINDOW_DEFAULT_WIDTH 640
-#define RETRO_WINDOW_DEFAULT_HEIGHT 480
+#define RETRO_WINDOW_DEFAULT_WIDTH 1280
+#define RETRO_WINDOW_DEFAULT_HEIGHT 560
 #define RETRO_CANVAS_DEFAULT_WIDTH (RETRO_WINDOW_DEFAULT_WIDTH / 2)
 #define RETRO_CANVAS_DEFAULT_HEIGHT (RETRO_WINDOW_DEFAULT_HEIGHT / 2)
 
@@ -66,11 +66,11 @@ typedef enum
   AC_UP,
   AC_DOWN,
   AC_LEFT,
-  AC_RIGHT
+  AC_RIGHT,
+  AC_WAIT
 } Actions;
 
-unsigned int
-randr(unsigned int min, unsigned int max)
+u32 randr(u32 min, u32 max)
 {
   double scaled = (double)rand()/RAND_MAX;
 
@@ -87,6 +87,7 @@ void Init(Settings* settings)
   Input_BindKey(SDL_SCANCODE_S, AC_DOWN);
   Input_BindKey(SDL_SCANCODE_A, AC_LEFT);
   Input_BindKey(SDL_SCANCODE_D, AC_RIGHT);
+  Input_BindKey(SDL_SCANCODE_R, AC_WAIT);
 
   Font_Load("NeoSans.png", &FONT_NEOSANS, Colour_Make(0,0,255), Colour_Make(255,0,255));
   Bitmap_Load("cave.png", &SPRITESHEET, 0);
@@ -95,8 +96,8 @@ void Init(Settings* settings)
   Bitmap_Load("coco.png", &COCO, 255);
   Bitmap_Load("Humanoid0.png", &SPRITESHEET_HUMANOID[0], 0);
   Bitmap_Load("Humanoid1.png", &SPRITESHEET_HUMANOID[1], 0);
-  Bitmap_Load("Reptile0.png", &SPRITESHEET_REPTILE[0], 0);
-  Bitmap_Load("Reptile1.png", &SPRITESHEET_REPTILE[1], 0);
+  Bitmap_Load("Reptile0.png",  &SPRITESHEET_REPTILE[0], 0);
+  Bitmap_Load("Reptile1.png",  &SPRITESHEET_REPTILE[1], 0);
 
   Animation_LoadHorizontal(&ANIMATEDSPRITE_PLAYER_IDLE, &PLAYERSHEET, 1, 100, 0, 0, 46, 50);
   Animation_LoadHorizontal(&ANIMATEDSPRITE_PLAYER_WALK, &PLAYERSHEET, 8, 120, 0, 150, 46, 50);
@@ -147,7 +148,7 @@ typedef struct
 
 typedef struct
 {
-  s32 x, y;
+  s32 x, y, dX, dY;
   u8  type;
   u8  health;
   u8  moveTime;
@@ -199,6 +200,19 @@ void Object_GetSpriteTileIndex(u8 type, XY* xy)
   }
 }
 
+u32 Object_MoveSpeed(u8 type)
+{
+  switch(type)
+  {
+    case OT_Human:       return 1;
+    case OT_FireDragon:  return 2;
+    case OT_WaterDragon: return 3;
+    case OT_EarthDragon: return 3;
+    case OT_AirDragon:   return 2;
+  }
+  return 0;
+}
+
 void Object_Draw(Object* object)
 {
   Bitmap* bitmap = Object_GetBitmap(object->type);
@@ -209,7 +223,7 @@ void Object_Draw(Object* object)
   r.right   = r.left   + TILE_SIZE;
   r.bottom  = r.top + TILE_SIZE;
 
-  Canvas_DrawRectangle(2, r);
+//  Canvas_DrawRectangle(2, r);
   XY xy;
   Object_GetSpriteTileIndex(object->type, &xy);
   Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
@@ -233,6 +247,67 @@ void Monster_New(u8 type, u32 x, u32 y)
   monster->moveTime = 1;
   monster->x = x;
   monster->y = y;
+}
+
+bool Object_Tick(Object* object)
+{
+  bool canMove = false;
+  bool isPlayer = (object == &GAME->player);
+
+  if (object->moveTime == 0)
+  {
+    s32 tx = object->x + object->dX;
+    s32 ty = object->y + object->dY;
+    
+    canMove = true;
+
+    if (tx < 0)
+      canMove = false;
+
+    if (tx >= SECTION_WIDTH)
+      canMove = false;
+
+    if (ty < 0)
+      canMove = false;
+
+    if (ty >= SECTION_WIDTH)
+      canMove = false;
+
+    if (canMove)
+    {
+      for(u32 i=0;i < GAME->nbObjects;i++)
+      {
+        Object* other = &GAME->objects[i];
+      
+        if (other == object)
+          continue;
+
+        bool otherIsPlayer = (other == &GAME->player);
+      
+        if (other->x == tx && other->y == ty && !otherIsPlayer)
+        {
+          canMove = false;
+        }
+      
+      }
+    }
+
+    if (canMove)
+    {
+      object->x = tx;
+      object->y = ty;
+      object->moveTime = Object_MoveSpeed(object->type) - 1;
+    }
+  }
+  else
+  {
+    object->moveTime--;
+  }
+
+  object->dX = 0;
+  object->dY = 0;
+
+  return canMove;
 }
 
 void RestartLevel()
@@ -267,60 +342,81 @@ void Start()
   RestartLevel();
 }
 
-
 void Step()
 {
   bool move = false;
+  bool wait = false;
 
   if (Input_GetActionReleased(AC_UP))
   {
-    GAME->player.y--;
+    GAME->player.dY = -1;
     move = true;
   }
   else if (Input_GetActionReleased(AC_DOWN))
   {
-    GAME->player.y++;
+    GAME->player.dY = 1;
     move = true;
   }
   
   if (Input_GetActionReleased(AC_LEFT))
   {
-    GAME->player.x--;
+    GAME->player.dX = -1;
     move = true;
   }
   else if (Input_GetActionReleased(AC_RIGHT))
   {
-    GAME->player.x++;
+    GAME->player.dX = 1;
     move = true;
   }
 
-  if (move)
+  if (Input_GetActionReleased(AC_WAIT))
   {
-    for(u32 i=0; i < GAME->nbObjects;i++)
+    GAME->player.dX = 0;
+    GAME->player.dY = 0;
+    move = true;
+    wait = true;
+  }
+
+  if (move || wait)
+  {
+    bool didMove = Object_Tick(&GAME->player);
+  
+    if (didMove || wait)
     {
-      Object* obj = &GAME->objects[i];
-      
-      s32 dx = obj->x - GAME->player.x;
-      s32 dy = obj->y - GAME->player.y;
 
-      if (dx > 0)
-        obj->x--;
-      if (dx < 0)
-        obj->x++;
-
-      if (dy > 0)
-        obj->y--;
-      if (dy < 0)
-        obj->y++;
-
-      if (GAME->player.x == obj->x && GAME->player.y == obj->y)
+      for(u32 i=0; i < GAME->nbObjects;i++)
       {
-        RestartLevel();
-        return;
-      }
+        Object* obj = &GAME->objects[i];
+        int dx = (obj->x - GAME->player.x);
+        int dy = (obj->y - GAME->player.y);
 
+        if (dx > 0)
+          obj->dX = -1;
+        else if (dx < 0)
+          obj->dX = 1;
+        else
+          obj->dX = 0;
+
+        if (dy > 0)
+          obj->dY = -1;
+        else if (dy < 0)
+          obj->dY = 1;
+        else
+          obj->dY = 0;
+
+        Object_Tick(obj);
+
+        if (GAME->player.x == obj->x && GAME->player.y == obj->y)
+        {
+          RestartLevel();
+          return;
+        }
+
+      }
     }
   }
+
+
 
   FrameCount++;
   AnimationTimer += (FrameCount % 10 == 0 ? 1 : 0);
