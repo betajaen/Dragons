@@ -345,6 +345,43 @@ void Monster_New(u8 type, u32 x, u32 y)
   monster->y = y;
 }
 
+bool TestBounds(s32 tx, s32 ty)
+{
+  bool canMove = true;
+  if (tx < 0)
+    canMove = false;
+
+  if (tx >= SECTION_WIDTH)
+    canMove = false;
+
+  if (ty < 0)
+    canMove = false;
+
+  if (ty >= SECTION_WIDTH)
+    canMove = false;
+
+  return canMove;
+}
+
+bool TestDiagonal(s32 x, s32 y, s32* dx_, s32* dy_)
+{
+  u32 dx = *dx_;
+  u32 dy = *dy_;
+
+  // Test X - If false, then dX = 0
+  if (CanCollide(x, y + dy))
+    dx = 0;
+
+  // Test Y - If false;
+  if (CanCollide(x + dx, dy))
+    dy = 0;
+
+  *dx_ = dx;
+  *dy_ = dy;
+
+  return dx != 0 && dy != 0;
+}
+
 bool Object_Tick(Object* object)
 {
   bool canMove = false;
@@ -355,22 +392,15 @@ bool Object_Tick(Object* object)
     s32 tx = object->x + object->dX;
     s32 ty = object->y + object->dY;
     
-    canMove = true;
-
-    if (tx < 0)
-      canMove = false;
-
-    if (tx >= SECTION_WIDTH)
-      canMove = false;
-
-    if (ty < 0)
-      canMove = false;
-
-    if (ty >= SECTION_WIDTH)
-      canMove = false;
+    canMove = TestBounds(tx, ty);
 
     if (CanCollide(tx, ty))
-      canMove = false;
+    {
+      if (TestDiagonal(object->x , object->y, &object->dX, &object->dY) == false)
+      {
+        canMove = false;
+      }
+    }
 
     if (canMove)
     {
