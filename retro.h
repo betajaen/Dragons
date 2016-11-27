@@ -1,8 +1,8 @@
 #ifndef RETRO_H
 #define RETRO_H
 
-#define RETRO_WINDOW_CAPTION "Dragons"
-#define RETRO_ARENA_SIZE Kilobytes(32)
+#define RETRO_WINDOW_CAPTION "Dragons are Hatching From Eggs And You Have To Escape!"
+#define RETRO_ARENA_SIZE Kilobytes(64)
 #define RETRO_WINDOW_DEFAULT_WIDTH 1280
 #define RETRO_WINDOW_DEFAULT_HEIGHT 560
 #define RETRO_CANVAS_DEFAULT_WIDTH (RETRO_WINDOW_DEFAULT_WIDTH / 2)

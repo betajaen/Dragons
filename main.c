@@ -19,6 +19,22 @@
 
 #define VERSION "1.0"
 
+enum 
+{
+  OT_None,
+  OT_Human,
+  OT_FireDragon,
+  OT_WaterDragon,
+  OT_EarthDragon,
+  OT_AirDragon,
+  OT_Egg,
+  OT_UsedObject,
+  OT_Potion_Slow,
+  OT_Potion_Wall,
+  OT_Door,
+  OT_Key
+};
+
 
 static Font           FONT_NEOSANS;
 static Bitmap         SPRITESHEET;
@@ -28,6 +44,8 @@ static Bitmap         SPRITESHEET_TOOL;
 static Bitmap         SPRITESHEET_WALLS;
 static Bitmap         SPRITESHEET_FLOORS;
 static Bitmap         SPRITESHEET_POTION;
+static Bitmap         SPRITESHEET_DOOR[2];
+static Bitmap         SPRITESHEET_KEY;
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -64,10 +82,22 @@ typedef struct
 {
   U16   col[SECTION_WIDTH * SECTION_HEIGHT];
   U16   non[SECTION_WIDTH * SECTION_HEIGHT];
+  U16   obj[SECTION_WIDTH * SECTION_HEIGHT];
 } SectionData;
 
 SectionData* SECTION_DATA;
 U32 SECTION_DATA_COUNT;
+SectionData* SECTION;
+char LOG_TEXT[256];
+
+void logText(const char* format, ...)
+{
+  va_list argptr;
+  va_start(argptr, format);
+  vsprintf(LOG_TEXT, format, argptr);
+  va_end(argptr);
+  printf(LOG_TEXT);
+}
 
 char* skipWhitespace(char* s)
 {
@@ -137,17 +167,29 @@ void LoadSectionData()
         data = readUInt(data, &v);
         data = skipToDigit(data);
 
-        if (v > 820)
-        {
-          section->col[i] = v - 820;
-          section->non[i] = 0;
-        }
-        else
+        if (v >= 0 && v < 820)
         {
           section->col[i] = 0;
           section->non[i] = v - 1;
+          section->obj[i] = 0;
         }
+        else if (v >= 820 && v < 1840)
+        {
+          section->col[i] = v - 820;
+          section->non[i] = 0;
+          section->obj[i] = 0;
+        }
+        else if (v >= 1840)
+        {
+          v -= 1840;
+          section->col[i] = 0;
+          section->non[i] = 0;
 
+          if (v == 0)
+          {
+            section->obj[i] = OT_Door;
+          }
+        }
       }
     }
     else
@@ -179,6 +221,8 @@ void Init(Settings* settings)
   Bitmap_Load("Floor.png", &SPRITESHEET_FLOORS, 0);
   Bitmap_Load("Tool.png", &SPRITESHEET_TOOL, 0);
   Bitmap_Load("Potion.png", &SPRITESHEET_POTION, 0);
+  Bitmap_Load("Door0.png", &SPRITESHEET_DOOR[0], 0);
+  Bitmap_Load("Door1.png", &SPRITESHEET_DOOR[1], 0);
   LoadSectionData();
 }
 
@@ -202,24 +246,22 @@ void Tile_Draw(Bitmap* bitmap, S32 x, S32 y, U32 ox, U32 oy)
 
 void Section_Draw(int index)
 {
-  SectionData* section = &SECTION_DATA[index]; 
-
   for(u32 x=0;x < SECTION_WIDTH;x++)
   {
     for(u32 y=0;y < SECTION_HEIGHT;y++)
     {
       u32 idx = x + (y * SECTION_WIDTH);
 
-      if (section->col[idx] > 0)
+      if (SECTION->col[idx] > 0)
       {
-        u32 s = section->col[idx];
+        u32 s = SECTION->col[idx];
         u32 sx = (s % 20);
         u32 sy = (s / 20);
         Tile_Draw(&SPRITESHEET_WALLS, x * TILE_SIZE, y * TILE_SIZE, sx, sy);
       }
       else
       {
-        u32 s = section->non[idx];
+        u32 s = SECTION->non[idx];
         u32 sx = (s % 21);
         u32 sy = (s / 21);
         Tile_Draw(&SPRITESHEET_FLOORS, x * TILE_SIZE, y * TILE_SIZE, sx, sy);
@@ -233,6 +275,17 @@ typedef struct
 {
   s32 x, y;
 } XY;
+
+static const XY XYDir[8] = {
+  {-1, -1},
+  {+0, -1},
+  {+1, -1},
+  {-1, +0},
+  {+1, +0},
+  {-1, +1},
+  {+0, +1},
+  {+1, +1},
+};
 
 typedef struct
 {
@@ -251,35 +304,23 @@ typedef struct
   u32    nbObjects;
   u32    section;
   u8     potion;
+  u8     held;
+  bool   keyDropped;
 } Game;
 
 Game*      GAME;
 bool       STEP_MODE;
 
-enum 
-{
-  OT_None,
-  OT_Human,
-  OT_FireDragon,
-  OT_WaterDragon,
-  OT_EarthDragon,
-  OT_AirDragon,
-  OT_Egg,
-  OT_UsedObject,
-  OT_Potion_Slow
-};
-
 bool CanCollide(u32 x, u32 y)
 {
   u32 idx = x + (y * SECTION_WIDTH);
-  SectionData* section = &SECTION_DATA[GAME->section];
-  
-  if (section->col[idx] > 0)
+
+  if (SECTION->col[idx] > 0)
   {
     return true;
   }
 
-  return section->non[idx] < 45;
+  return SECTION->non[idx] < 45;
 }
 
 bool Object_IsDragon(u8 type)
@@ -305,8 +346,10 @@ Bitmap* Object_GetBitmap(u8 type)
     case OT_AirDragon:      return &SPRITESHEET_REPTILE[AnimationTimer % 2];
     case OT_Egg:            return &SPRITESHEET_TOOL;
     case OT_Potion_Slow:    return &SPRITESHEET_POTION;
+    case OT_Potion_Wall:    return &SPRITESHEET_POTION;
+    case OT_Door:           return &SPRITESHEET_DOOR[AnimationTimer % 2];
   }
-  return 0;
+  return NULL;
 }
 
 
@@ -321,8 +364,11 @@ void Object_GetSpriteTileIndex(u8 type, XY* xy)
     case OT_AirDragon:   xy->x = 3; xy->y = 2; return;
     case OT_Egg:         xy->x = 1; xy->y = 0; return;
     case OT_Potion_Slow: xy->x = 0; xy->y = 0; return;
-    case OT_UsedObject:   return;
+    case OT_Potion_Wall: xy->x = 1; xy->y = 0; return;
+    case OT_Door:        xy->x = 0; xy->y = 0; return;
+    case OT_Key:         xy->x = 0; xy->y = 0; return;
   }
+  xy->x = 0; xy->y = 0;
 }
 
 u32 Object_MoveSpeed(u8 type)
@@ -371,7 +417,7 @@ void Player_New(u32 x, u32 y)
   Object* player = &GAME->player;
   player->type = OT_Human;
   player->health = 1;
-  player->moveTime = 1;
+  player->moveTime = 0;
   player->actionTime = Object_MaxActionTime(OT_Human) + randr(1, 10);
   player->x = x;
   player->y = y;
@@ -393,9 +439,11 @@ bool Object_CanPassthrough(u8 type)
 
   switch(type)
   {
-    case OT_Egg:          return true;
-    case OT_UsedObject:   return true;
-    case OT_Potion_Slow:  return true;
+    case OT_Egg:         
+    case OT_UsedObject:  
+    case OT_Potion_Slow: 
+    case OT_Potion_Wall:
+      return true;
   }
 
   return false;
@@ -438,6 +486,52 @@ bool TestDiagonal(s32 x, s32 y, s32* dx_, s32* dy_)
   return dx != 0 && dy != 0;
 }
 
+u32 Object_Count(u8 type)
+{
+  u32 count = 0;
+  for(u32 i=0;i < GAME->nbObjects;i++)
+  {
+    if(GAME->objects[i].type == type)
+      count++;
+  }
+  return count;
+}
+
+u32 Object_CountDragon()
+{
+  u32 count = 0;
+  for(u32 i=0;i < GAME->nbObjects;i++)
+  {
+    if(GAME->objects[i].type >= OT_AirDragon && GAME->objects[i].type <= OT_FireDragon)
+      count++;
+  }
+  return count;
+}
+
+void Object_PickupPotion(Object* object)
+{
+  GAME->potion = object->type;
+  object->type = OT_UsedObject;
+}
+
+void Game_KeySpawnChance(u32 x, u32 y)
+{
+  if (GAME->keyDropped == false)
+  {
+    // any eggs
+    u32 eggCount = Object_Count(OT_Egg);
+    u32 dragonCount = Object_CountDragon();
+
+    int chance = eggCount + dragonCount;
+
+    if (randr(1, chance) == 1)
+    {
+      Object_New(OT_Key, x, y);
+      GAME->keyDropped = true;
+    }
+  }
+}
+
 bool Object_Tick(Object* object)
 {
   bool canMove = false;
@@ -478,10 +572,16 @@ bool Object_Tick(Object* object)
             {
               case OT_Egg:
                 other->type = OT_UsedObject;
+                Game_KeySpawnChance(tx, ty);
+                logText("An Egg was crushed");
               break;
               case OT_Potion_Slow:
-                GAME->potion = OT_Potion_Slow;
-                other->type = OT_UsedObject;
+                logText("Picked up Splash Potion of Slowness");
+                Object_PickupPotion(other);
+              break;
+              case OT_Potion_Wall:
+                logText("Picked up Splash Potion of Wall Making");
+                Object_PickupPotion(other);
               break;
             }
             canMove = true;
@@ -515,6 +615,13 @@ bool Object_Tick(Object* object)
       case OT_Egg:
         object->type = randr(OT_FireDragon, OT_AirDragon);
         object->moveTime = Object_MoveSpeed(object->type) - 1;
+        switch(object->type)
+        {
+          case OT_FireDragon:  logText("A Fire Dragon has hatched!");  break;
+          case OT_WaterDragon: logText("A Water Dragon has hatched!"); break;
+          case OT_AirDragon:   logText("A Air Dragon has hatched!");   break;
+          case OT_EarthDragon: logText("A Earh Dragon has hatched!");  break;
+        }
       break;
     }
     object->actionTime = Object_MaxActionTime(object->type) + randr(1, 10);
@@ -530,42 +637,58 @@ bool Object_Tick(Object* object)
   return canMove;
 }
 
+#define SPAWN_BEGIN(N, M) \
+  capacity = randr(N, M); tries = 20;\
+  while(true)\
+  {\
+    tries--; if (tries == 0) break; \
+    x = randr(0, SECTION_WIDTH - 1);\
+    y = randr(0, SECTION_HEIGHT - 1);\
+    if (!CanCollide(x, y))\
+    { capacity--; tries = 20; if (capacity == 0) break;
+
+#define SPAWN_END }}
+
 void RestartLevel()
 {
   memset(GAME, 0, sizeof(Game));
-
+  u32 sectionId = randr(0,SECTION_DATA_COUNT - 1);
+  memcpy(SECTION, &SECTION_DATA[sectionId],sizeof(SectionData));
+  
   Player_New(SECTION_WIDTH / 2, SECTION_HEIGHT / 2);
 
-  u32 eggCapacity = randr(4, 6);
-  while(eggCapacity)
+  for(u32 i=0;i < SECTION_WIDTH * SECTION_HEIGHT;i++)
   {
-    u32 x = randr(0, SECTION_WIDTH - 1);
-    u32 y = randr(0, SECTION_HEIGHT - 1);
-    if (!CanCollide(x, y))
+    if (SECTION->obj[i] > 0)
     {
-      Object_New(OT_Egg, x, y);
-      eggCapacity--;
+      u32 x = i % SECTION_WIDTH;
+      u32 y = i / SECTION_WIDTH;
+
+      Object_New((u8)SECTION->obj[i], x, y);
     }
   }
 
-  u32 potionCapacity = randr(1, 3);
+  s32 x, y, capacity, tries;
 
-  while(potionCapacity)
+  SPAWN_BEGIN(6, 8)
   {
-    u32 x = randr(0, SECTION_WIDTH - 1);
-    u32 y = randr(0, SECTION_HEIGHT - 1);
-    if (!CanCollide(x, y))
-    {
-      Object_New(randr(OT_Potion_Slow, OT_Potion_Slow), x, y);
-      potionCapacity--;
-    }
+    Object_New(OT_Egg, x, y);
   }
+  SPAWN_END;
 
+  SPAWN_BEGIN(4, 12)
+  {
+    Object_New(randr(OT_Potion_Slow, OT_Potion_Wall), x, y);
+  }
+  SPAWN_END;
+
+  logText(" Your surrounded by Dragon Eggs. Find the Key and Escape!");
 }
 
 void Start()
 {
   GAME = Scope_New(Game);
+  SECTION = Scope_New(SectionData);
   Canvas_SetFlags(0, CNF_Render | CNF_Clear, 0);
   Scope_Push('LEVL');
   RestartLevel();
@@ -617,6 +740,7 @@ void Step()
     {
       case OT_Potion_Slow:
       {
+        u32 count = 0;
         for(u32 i=0; i < GAME->nbObjects;i++)
         {
           Object* obj = &GAME->objects[i];
@@ -626,7 +750,29 @@ void Step()
           if ((dx * dx) + (dy * dy) < (7 * 7) && Object_IsDragon(obj->type))
           {
             obj->moveTime += 6;
+            count++;
           }
+        }
+
+
+        logText("Used Splash Potion of Slowness. %i Dragons Slowed.", count);
+      }
+      break;
+      case OT_Potion_Wall:
+      {
+        for(u32 i=0;i < 8;i++)
+        {
+          XY xy = XYDir[i];
+          xy.x += GAME->player.x;
+          xy.y += GAME->player.y;
+          if (!CanCollide(xy.x, xy.y))
+          {
+            SECTION->col[xy.x + (xy.y * SECTION_WIDTH)] = 63;
+            SECTION->non[xy.x + (xy.y * SECTION_WIDTH)] = 0;
+            break;
+          }
+
+          logText("Used Splash Potion of Wall Making");
         }
       }
       break;
@@ -694,7 +840,6 @@ void Step()
     Object_Draw(&GAME->objects[i]);
   }
 
-
   if (GAME->potion != 0)
   {
     XY xy;
@@ -705,5 +850,7 @@ void Step()
       Tile_Draw(bitmap, 0, 0,  xy.x, xy.y);
     }
   }
+
+  Canvas_PrintF(1, Canvas_GetHeight() - 12, &FONT_NEOSANS, 15, "> %s", LOG_TEXT);
 
 }
