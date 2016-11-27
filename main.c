@@ -1,14 +1,12 @@
-
 #include "retro.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 
-
 #define TILE_SIZE 16
-#define SECTION_WIDTH   (RETRO_CANVAS_DEFAULT_WIDTH / TILE_SIZE)
-#define SECTION_HEIGHT  (RETRO_CANVAS_DEFAULT_HEIGHT / TILE_SIZE)
+#define SECTION_WIDTH   40
+#define SECTION_HEIGHT  16
 
 #define LEVEL_WIDTH (SECTION_WIDTH * 2)
 #define LEVEL_HEIGHT (SECTION_HEIGHT)
@@ -16,8 +14,10 @@
 
 #define MAX_MONSTERS 256
 
-
 #define VERSION "1.0"
+#define CHEAT_MODE 0
+#define SECTION_START 1
+
 
 enum 
 {
@@ -31,6 +31,7 @@ enum
   OT_UsedObject,
   OT_Potion_Slow,
   OT_Potion_Wall,
+  OT_Potion_Harming,
   OT_Door,
   OT_Key
 };
@@ -39,6 +40,13 @@ enum
 static Font           FONT_NEOSANS;
 static Bitmap         SPRITESHEET;
 static Bitmap         SPRITESHEET_TILESET;
+static Sound          SOUND_JUMP1;
+static Sound          SOUND_JUMP2;
+static Sound          SOUND_HURT1;
+static Sound          SOUND_HURT2;
+static Sound          SOUND_CRUSH;
+static Sound          SOUND_PICKUP2;
+static Sound          SOUND_SELECT;
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -90,6 +98,7 @@ void logText(const char* format, ...)
   vsprintf(LOG_TEXT, format, argptr);
   va_end(argptr);
   printf(LOG_TEXT);
+  printf("\n");
 }
 
 char* skipWhitespace(char* s)
@@ -137,8 +146,7 @@ char* readUInt(char* s, U32* i)
 
 u8 GetTileType(u32 v)
 {
-  v--;
-  switch(v)
+  switch(v - 1)
   {
     case 7:
     case 25:
@@ -161,7 +169,7 @@ u8 GetTileType(u32 v)
     case 52:
     case 53:
       return 0; // Floor
-    case 2:
+    case 1:
       return 2; // Door (Object)
   }
 
@@ -242,6 +250,14 @@ void Init(Settings* settings)
   Font_Load("NeoSans.png", &FONT_NEOSANS, Colour_Make(0,0,255), Colour_Make(255,0,255));
   Bitmap_Load("Tileset.png", &SPRITESHEET_TILESET, 3);
 
+  Sound_Load(&SOUND_HURT1,   "hurt1.wav");
+  Sound_Load(&SOUND_HURT2,   "hurt2.wav");
+  Sound_Load(&SOUND_JUMP1,   "jump1.wav");
+  Sound_Load(&SOUND_JUMP2,   "jump2.wav");
+  Sound_Load(&SOUND_CRUSH,   "crush.wav");
+  Sound_Load(&SOUND_PICKUP2, "pickup2.wav");
+  Sound_Load(&SOUND_SELECT,  "select.wav");
+
   LoadSectionData();
 }
 
@@ -316,6 +332,8 @@ typedef struct
   u8     potion;
   u8     held;
   bool   keyDropped;
+  u32    level;
+  u32    score;
 } Game;
 
 Game*      GAME;
@@ -357,7 +375,10 @@ Bitmap* Object_GetBitmap(u8 type)
     case OT_Egg:            
     case OT_Potion_Slow:    
     case OT_Potion_Wall:    
-    case OT_Door:           return &SPRITESHEET_TILESET;
+    case OT_Potion_Harming:    
+    case OT_Door:           
+    case OT_Key:
+                        return &SPRITESHEET_TILESET;
   }
   return NULL;
 }
@@ -370,16 +391,17 @@ void Object_GetSpriteTileIndex(u8 type, XY* xy)
   xy->x = 0; xy->y = 0;
   switch(type)
   {
-    case OT_Human:       idx = 190; break;
-    case OT_FireDragon:  idx = 221; break;
-    case OT_WaterDragon: idx = 228; break;
-    case OT_EarthDragon: idx = 229; break;
-    case OT_AirDragon:   idx = 212; break;
-    case OT_Egg:         idx = 173; break;
-    case OT_Potion_Slow: idx = 97;  break;
-    case OT_Potion_Wall: idx = 98;  break;
-    case OT_Door:        idx = 2;   break;
-    case OT_Key:         idx = 80;  break;
+    case OT_Human:          idx = 190; break;
+    case OT_FireDragon:     idx = 221; break;
+    case OT_WaterDragon:    idx = 228; break;
+    case OT_EarthDragon:    idx = 229; break;
+    case OT_AirDragon:      idx = 212; break;
+    case OT_Egg:            idx = 173; break;
+    case OT_Potion_Slow:    idx = 97;  break;
+    case OT_Potion_Wall:    idx = 98;  break;
+    case OT_Potion_Harming: idx = 99;  break;
+    case OT_Door:           idx = 2;   break;
+    case OT_Key:            idx = 80;  break;
   }
 
   if (idx > 0)
@@ -421,6 +443,15 @@ void Object_Draw(Object* object)
   XY xy;
   Object_GetSpriteTileIndex(object->type, &xy);
   Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
+#if 0
+  Rect r;
+  r.left = object->x * TILE_SIZE;
+  r.top  = object->y * TILE_SIZE;
+  r.right = r.left + TILE_SIZE;
+  r.bottom = r.top + TILE_SIZE;
+  Canvas_DrawRectangle(4, r);
+#endif 0
+
 }
 
 void Player_New(u32 x, u32 y)
@@ -454,6 +485,9 @@ bool Object_CanPassthrough(u8 type)
     case OT_UsedObject:  
     case OT_Potion_Slow: 
     case OT_Potion_Wall:
+    case OT_Potion_Harming:
+    case OT_Key:
+    case OT_Door:
       return true;
   }
 
@@ -534,14 +568,17 @@ void Game_KeySpawnChance(u32 x, u32 y)
     u32 dragonCount = Object_CountDragon();
 
     int chance = eggCount + dragonCount;
+    int r = randr(1, chance);
 
-    if (randr(1, chance) == 1)
+    if (r == 1)
     {
       Object_New(OT_Key, x, y);
       GAME->keyDropped = true;
+      logText("A key was dropped");
     }
   }
 }
+void RestartLevel();
 
 bool Object_Tick(Object* object)
 {
@@ -573,29 +610,62 @@ bool Object_Tick(Object* object)
           continue;
 
         bool otherIsPlayer = (other == &GAME->player);
-        bool otherIsPassThrough    = Object_CanPassthrough(other->type);
-      
+        bool otherIsPassThrough  = Object_CanPassthrough(other->type);
+
         if (other->x == tx && other->y == ty)
         {
-          if (isPlayer && otherIsPassThrough)
+          if (Object_IsDragon(object->type) && Object_IsDragon(other->type))
           {
+            canMove = true;
+            object->type = OT_UsedObject;
+            other->type  = OT_UsedObject;
+            Game_KeySpawnChance(object->x, object->y);
+            Game_KeySpawnChance(other->x, other->y);
+            logText("Two dragons have collided");
+            Sound_Play(&SOUND_HURT1, RETRO_SOUND_DEFAULT_VOLUME);
+          }
+          else if (isPlayer && otherIsPassThrough)
+          {
+            canMove = true;
             switch(other->type)
             {
               case OT_Egg:
                 other->type = OT_UsedObject;
                 Game_KeySpawnChance(tx, ty);
                 logText("An Egg was crushed");
+                Sound_Play(&SOUND_CRUSH, RETRO_SOUND_DEFAULT_VOLUME);
               break;
               case OT_Potion_Slow:
                 logText("Picked up Splash Potion of Slowness");
                 Object_PickupPotion(other);
+                Sound_Play(&SOUND_SELECT, RETRO_SOUND_DEFAULT_VOLUME);
               break;
               case OT_Potion_Wall:
                 logText("Picked up Splash Potion of Wall Making");
                 Object_PickupPotion(other);
+                Sound_Play(&SOUND_SELECT, RETRO_SOUND_DEFAULT_VOLUME);
+              break;
+              case OT_Key:
+                other->type = OT_UsedObject;
+                GAME->held  = OT_Key;
+              break;
+              case OT_Door:
+                if (GAME->held == OT_Key)
+                {
+                  logText("Win!");
+                  GAME->level++;
+                  if (GAME->level == SECTION_DATA_COUNT)
+                  {
+                    GAME->score++;
+                    Scope_Push('WIN');
+                  }
+
+                  RestartLevel();
+                }
+                else
+                  canMove = false;
               break;
             }
-            canMove = true;
           }
           else if (!otherIsPlayer)
             canMove = false;
@@ -662,11 +732,27 @@ bool Object_Tick(Object* object)
 
 void RestartLevel()
 {
+  u32 score = GAME->score;
+  u32 level = GAME->level;
   memset(GAME, 0, sizeof(Game));
-  u32 sectionId = randr(0,SECTION_DATA_COUNT - 1);
+  GAME->score = score;
+  GAME->level = level;
+
+  u32 sectionId = GAME->level;
   memcpy(SECTION, &SECTION_DATA[sectionId],sizeof(SectionData));
-  
-  Player_New(SECTION_WIDTH / 2, SECTION_HEIGHT / 2);
+
+  u32 mx = SECTION_WIDTH / 2;
+  u32 my = SECTION_HEIGHT / 2;
+
+#if CHEAT_MODE
+  mx = 4;
+  my = 4;
+#endif
+  Player_New(mx, my);
+
+#if CHEAT_MODE
+  GAME->held = OT_Key;
+#endif
 
   for(u32 i=0;i < SECTION_WIDTH * SECTION_HEIGHT;i++)
   {
@@ -681,7 +767,7 @@ void RestartLevel()
 
   s32 x, y, capacity, tries;
 
-  SPAWN_BEGIN(6, 8)
+  SPAWN_BEGIN(6, 80)
   {
     Object_New(OT_Egg, x, y);
   }
@@ -693,20 +779,36 @@ void RestartLevel()
   }
   SPAWN_END;
 
-  logText(" Your surrounded by Dragon Eggs. Find the Key and Escape!");
+  logText("Your surrounded by Dragon Eggs. Find the Key and Escape!");
 }
 
 void Start()
 {
   GAME = Scope_New(Game);
+  GAME->level = SECTION_START;
   SECTION = Scope_New(SectionData);
   Canvas_SetFlags(0, CNF_Render | CNF_Clear, 0);
   Scope_Push('LEVL');
   RestartLevel();
+  Music_Play("dragon2.mod");
 }
 
 void Step()
 {
+  if (Scope_GetName() == 'WIN')
+  {
+    Canvas_PrintF(10, 10, &FONT_NEOSANS, 4, "Score: %08X", GAME->score);
+    Canvas_PrintF(10, 20, &FONT_NEOSANS, 4, "Press <USE> to play again");
+
+    if (Input_GetActionReleased(AC_USE))
+    {
+      GAME->level = SECTION_START;
+      RestartLevel();
+      Scope_Pop();
+    }
+    return;
+  }
+
   bool move = false;
   bool wait = false;
 
@@ -862,6 +964,16 @@ void Step()
     }
   }
 
+  if (GAME->held != 0)
+  {
+    XY xy;
+    Object_GetSpriteTileIndex(GAME->held, &xy);
+    Bitmap* bitmap = Object_GetBitmap(GAME->held);
+    if (bitmap != NULL)
+    {
+      Tile_Draw(bitmap, 16, 0,  xy.x, xy.y);
+    }
+  }
   Canvas_PrintF(4, Canvas_GetHeight() - 12, &FONT_NEOSANS, 15, "> %s", LOG_TEXT);
 
 }
