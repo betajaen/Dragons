@@ -38,14 +38,7 @@ enum
 
 static Font           FONT_NEOSANS;
 static Bitmap         SPRITESHEET;
-static Bitmap         SPRITESHEET_HUMANOID[2];
-static Bitmap         SPRITESHEET_REPTILE[2];
-static Bitmap         SPRITESHEET_TOOL;
-static Bitmap         SPRITESHEET_WALLS;
-static Bitmap         SPRITESHEET_FLOORS;
-static Bitmap         SPRITESHEET_POTION;
-static Bitmap         SPRITESHEET_DOOR[2];
-static Bitmap         SPRITESHEET_KEY;
+static Bitmap         SPRITESHEET_TILESET;
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -142,6 +135,39 @@ char* readUInt(char* s, U32* i)
   return s;
 }
 
+u8 GetTileType(u32 v)
+{
+  v--;
+  switch(v)
+  {
+    case 7:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
+    case 39:
+    case 45:
+    case 46:
+    case 47:
+    case 48:
+    case 49:
+    case 50:
+    case 51:
+    case 52:
+    case 53:
+      return 0; // Floor
+    case 2:
+      return 2; // Door (Object)
+  }
+
+  return 1; // Wall/Collidable
+}
+
 void LoadSectionData()
 {
   SECTION_DATA = malloc(sizeof(SectionData) * SECTION_COUNT);
@@ -167,25 +193,26 @@ void LoadSectionData()
         data = readUInt(data, &v);
         data = skipToDigit(data);
 
-        if (v >= 0 && v < 820)
+        u8 type = GetTileType(v);
+
+        if (type == 0)
         {
           section->col[i] = 0;
           section->non[i] = v - 1;
           section->obj[i] = 0;
         }
-        else if (v >= 820 && v < 1840)
+        else if (type == 1)
         {
-          section->col[i] = v - 820;
+          section->col[i] = v - 1;
           section->non[i] = 0;
           section->obj[i] = 0;
         }
-        else if (v >= 1840)
+        else
         {
-          v -= 1840;
           section->col[i] = 0;
           section->non[i] = 0;
 
-          if (v == 0)
+          if (v == 2)
           {
             section->obj[i] = OT_Door;
           }
@@ -213,16 +240,8 @@ void Init(Settings* settings)
   Input_BindKey(SDL_SCANCODE_SPACE, AC_USE);
 
   Font_Load("NeoSans.png", &FONT_NEOSANS, Colour_Make(0,0,255), Colour_Make(255,0,255));
-  Bitmap_Load("Humanoid0.png", &SPRITESHEET_HUMANOID[0], 0);
-  Bitmap_Load("Humanoid1.png", &SPRITESHEET_HUMANOID[1], 0);
-  Bitmap_Load("Reptile0.png",  &SPRITESHEET_REPTILE[0], 0);
-  Bitmap_Load("Reptile1.png",  &SPRITESHEET_REPTILE[1], 0);
-  Bitmap_Load("Wall.png", &SPRITESHEET_WALLS, 0);
-  Bitmap_Load("Floor.png", &SPRITESHEET_FLOORS, 0);
-  Bitmap_Load("Tool.png", &SPRITESHEET_TOOL, 0);
-  Bitmap_Load("Potion.png", &SPRITESHEET_POTION, 0);
-  Bitmap_Load("Door0.png", &SPRITESHEET_DOOR[0], 0);
-  Bitmap_Load("Door1.png", &SPRITESHEET_DOOR[1], 0);
+  Bitmap_Load("Tileset.png", &SPRITESHEET_TILESET, 3);
+
   LoadSectionData();
 }
 
@@ -252,20 +271,11 @@ void Section_Draw(int index)
     {
       u32 idx = x + (y * SECTION_WIDTH);
 
-      if (SECTION->col[idx] > 0)
-      {
-        u32 s = SECTION->col[idx];
-        u32 sx = (s % 20);
-        u32 sy = (s / 20);
-        Tile_Draw(&SPRITESHEET_WALLS, x * TILE_SIZE, y * TILE_SIZE, sx, sy);
-      }
-      else
-      {
-        u32 s = SECTION->non[idx];
-        u32 sx = (s % 21);
-        u32 sy = (s / 21);
-        Tile_Draw(&SPRITESHEET_FLOORS, x * TILE_SIZE, y * TILE_SIZE, sx, sy);
-      }
+      u32 s = SECTION->col[idx] > 0 ? SECTION->col[idx] : SECTION->non[idx];
+
+      u32 sx = (s % 10);
+      u32 sy = (s / 10);
+      Tile_Draw(&SPRITESHEET_TILESET, x * TILE_SIZE, y * TILE_SIZE, sx, sy);
     }
   }
 
@@ -320,7 +330,7 @@ bool CanCollide(u32 x, u32 y)
     return true;
   }
 
-  return SECTION->non[idx] < 45;
+  return false;
 }
 
 bool Object_IsDragon(u8 type)
@@ -339,15 +349,15 @@ Bitmap* Object_GetBitmap(u8 type)
 {
   switch(type)
   {
-    case OT_Human:          return &SPRITESHEET_HUMANOID[AnimationTimer % 2];
-    case OT_FireDragon:     return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_WaterDragon:    return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_EarthDragon:    return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_AirDragon:      return &SPRITESHEET_REPTILE[AnimationTimer % 2];
-    case OT_Egg:            return &SPRITESHEET_TOOL;
-    case OT_Potion_Slow:    return &SPRITESHEET_POTION;
-    case OT_Potion_Wall:    return &SPRITESHEET_POTION;
-    case OT_Door:           return &SPRITESHEET_DOOR[AnimationTimer % 2];
+    case OT_Human:          
+    case OT_FireDragon:     
+    case OT_WaterDragon:    
+    case OT_EarthDragon:    
+    case OT_AirDragon:      
+    case OT_Egg:            
+    case OT_Potion_Slow:    
+    case OT_Potion_Wall:    
+    case OT_Door:           return &SPRITESHEET_TILESET;
   }
   return NULL;
 }
@@ -355,20 +365,28 @@ Bitmap* Object_GetBitmap(u8 type)
 
 void Object_GetSpriteTileIndex(u8 type, XY* xy)
 {
+  u32 idx = 0;
+
+  xy->x = 0; xy->y = 0;
   switch(type)
   {
-    case OT_Human:       xy->x = 0; xy->y = 0; return;
-    case OT_FireDragon:  xy->x = 1; xy->y = 3; return;
-    case OT_WaterDragon: xy->x = 4; xy->y = 3; return;
-    case OT_EarthDragon: xy->x = 5; xy->y = 2; return;
-    case OT_AirDragon:   xy->x = 3; xy->y = 2; return;
-    case OT_Egg:         xy->x = 1; xy->y = 0; return;
-    case OT_Potion_Slow: xy->x = 0; xy->y = 0; return;
-    case OT_Potion_Wall: xy->x = 1; xy->y = 0; return;
-    case OT_Door:        xy->x = 0; xy->y = 0; return;
-    case OT_Key:         xy->x = 0; xy->y = 0; return;
+    case OT_Human:       idx = 190; break;
+    case OT_FireDragon:  idx = 221; break;
+    case OT_WaterDragon: idx = 228; break;
+    case OT_EarthDragon: idx = 229; break;
+    case OT_AirDragon:   idx = 212; break;
+    case OT_Egg:         idx = 173; break;
+    case OT_Potion_Slow: idx = 97;  break;
+    case OT_Potion_Wall: idx = 98;  break;
+    case OT_Door:        idx = 2;   break;
+    case OT_Key:         idx = 80;  break;
   }
-  xy->x = 0; xy->y = 0;
+
+  if (idx > 0)
+  {
+    xy->x = idx % 10;
+    xy->y = idx / 10;
+  }
 }
 
 u32 Object_MoveSpeed(u8 type)
@@ -400,16 +418,9 @@ void Object_Draw(Object* object)
   if (bitmap == NULL)
     return;
 
-  Rect r;
-  r.left    = object->x * TILE_SIZE;
-  r.top     = object->y * TILE_SIZE;
-  r.right   = r.left    + TILE_SIZE;
-  r.bottom  = r.top     + TILE_SIZE;
-
   XY xy;
   Object_GetSpriteTileIndex(object->type, &xy);
   Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
-  Canvas_PrintF(object->x * TILE_SIZE, object->y * TILE_SIZE, &FONT_NEOSANS, 1, "%i", object->noMove);
 }
 
 void Player_New(u32 x, u32 y)
@@ -767,7 +778,7 @@ void Step()
           xy.y += GAME->player.y;
           if (!CanCollide(xy.x, xy.y))
           {
-            SECTION->col[xy.x + (xy.y * SECTION_WIDTH)] = 63;
+            SECTION->col[xy.x + (xy.y * SECTION_WIDTH)] = 15;
             SECTION->non[xy.x + (xy.y * SECTION_WIDTH)] = 0;
             break;
           }
@@ -851,6 +862,6 @@ void Step()
     }
   }
 
-  Canvas_PrintF(1, Canvas_GetHeight() - 12, &FONT_NEOSANS, 15, "> %s", LOG_TEXT);
+  Canvas_PrintF(4, Canvas_GetHeight() - 12, &FONT_NEOSANS, 15, "> %s", LOG_TEXT);
 
 }
