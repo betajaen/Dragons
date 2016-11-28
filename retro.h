@@ -41,7 +41,7 @@
 #endif
 
 #ifndef RETRO_SOUND_DEFAULT_VOLUME
-#define RETRO_SOUND_DEFAULT_VOLUME 1.0
+#define RETRO_SOUND_DEFAULT_VOLUME 128
 #endif
 
 #ifndef RETRO_FRAME_RATE
@@ -273,6 +273,9 @@ void  Bitmap_Load(const char* name, Bitmap* outBitmap, U8 transparentIndex);
 // Loads a bitmap with the palette order matching exactly the canvas palette.
 // Offset is given to offset the loaded order by N colours
 void  Bitmap_LoadPaletted(const char* name, Bitmap* outBitmap, U8 colourOffset);
+
+// Loads a bitmap and matches the palette to the canvas palette best it can.
+void  Bitmap_Load24(const char* name, Bitmap* outBitmap, U8 transparentR, U8 transparentG, U8 transparentB);
 
 void  Sprite_Make(Sprite* inSprite, Bitmap* bitmap, U32 x, U32 y, U32 w, U32 h);
 

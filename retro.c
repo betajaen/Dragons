@@ -380,6 +380,60 @@ void Bitmap_Load(const char* name, Bitmap* outBitmap, U8 transparentIndex)
   outBitmap->imageData = imageData;
 }
 
+void  Bitmap_Load24(const char* name, Bitmap* outBitmap, U8 transparentR, U8 transparentG, U8 transparentB)
+{
+
+  U32 width, height;
+
+  U8* imageData = NULL;
+
+#ifdef RETRO_WINDOWS
+  U32 resourceSize = 0;
+  void* resourceData = Resource_Load(name, &resourceSize);
+  lodepng_decode_memory(&imageData, &width, &height, resourceData, resourceSize, LCT_RGB, 8);
+#elif defined(RETRO_BROWSER)
+  RETRO_MAKE_BROWSER_PATH(name);
+  lodepng_decode_file(&imageData, &width, &height, RETRO_BROWSER_PATH, LCT_RGB, 8);
+#endif
+
+  assert(imageData);
+
+  SDL_Texture* texture = SDL_CreateTexture(gRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+  void* pixelsVoid;
+  int pitch;
+  SDL_LockTexture(texture, NULL, &pixelsVoid, &pitch);
+  U8* pixels = (U8*) pixelsVoid;
+
+  Palette* palette = &gSettings.palette;
+
+  for(U32 i=0, j=0;i < (width * height * 3);i+=3, j+=4)
+  {
+    Colour col;
+    col.r = imageData[i+0];
+    col.g = imageData[i+1];
+    col.b = imageData[i+2];
+
+    if (col.r == transparentR && col.g == transparentG && col.b == transparentB)
+      col.a = 0;
+    else
+      col.a = 255;
+
+    pixels[j+0] = col.a; 
+    pixels[j+1] = col.b;
+    pixels[j+2] = col.g;
+    pixels[j+3] = col.r;
+  }
+
+  SDL_UnlockTexture(texture);
+
+  outBitmap->w = width;
+  outBitmap->h = height;
+  outBitmap->texture = texture;
+  outBitmap->imageData = imageData;
+}
+
 SpriteHandle SpriteHandle_Set(Sprite* sprite)
 {
   for (U32 i=0;i < 256;i++)
@@ -1452,7 +1506,7 @@ void Font_Load(const char* name, Font* outFont, Colour markerColour, Colour tran
   outFont->widths[' '] = outFont->widths['e'];
 
   // Copy rest of image into the texture.
-  for(i=0, j=width * 3;i < width * height * 4;i+=4, j+=3)
+  for(i=0, j=width * 3;i < width * (height - 1) * 4;i+=4, j+=3)
   {
     Colour col = Colour_ReadRGB(&imageData[j]);
 

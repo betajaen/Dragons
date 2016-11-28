@@ -11,12 +11,13 @@
 #define LEVEL_WIDTH (SECTION_WIDTH * 2)
 #define LEVEL_HEIGHT (SECTION_HEIGHT)
 #define SECTION_COUNT 4
+#define TILESET_COUNT 3
 
 #define MAX_MONSTERS 256
 
 #define VERSION "1.0"
 #define CHEAT_MODE 0
-#define SECTION_START 1
+#define SECTION_START 0
 
 
 enum 
@@ -39,7 +40,7 @@ enum
 
 static Font           FONT_NEOSANS;
 static Bitmap         SPRITESHEET;
-static Bitmap         SPRITESHEET_TILESET;
+static Bitmap         SPRITESHEET_TILESET[3];
 static Sound          SOUND_JUMP1;
 static Sound          SOUND_JUMP2;
 static Sound          SOUND_HURT1;
@@ -68,7 +69,8 @@ typedef enum
   AC_LEFT,
   AC_RIGHT,
   AC_WAIT,
-  AC_USE
+  AC_USE,
+  AC_CHEAT
 } Actions;
 
 u32 randr(u32 min, u32 max)
@@ -90,6 +92,7 @@ SectionData* SECTION_DATA;
 U32 SECTION_DATA_COUNT;
 SectionData* SECTION;
 char LOG_TEXT[256];
+u32 SECTION_ID;
 
 void logText(const char* format, ...)
 {
@@ -149,6 +152,8 @@ u8 GetTileType(u32 v)
   switch(v - 1)
   {
     case 7:
+    case 16:
+    case 17:
     case 25:
     case 26:
     case 27:
@@ -168,6 +173,7 @@ u8 GetTileType(u32 v)
     case 51:
     case 52:
     case 53:
+    case 59:
       return 0; // Floor
     case 1:
       return 2; // Door (Object)
@@ -237,7 +243,6 @@ void LoadSectionData()
 void Init(Settings* settings)
 {
   Palette_Make(&settings->palette);
-  Palette_LoadFromBitmap("palette.png", &settings->palette);
 
   Input_BindKey(SDL_SCANCODE_ESCAPE, AC_QUIT);
   Input_BindKey(SDL_SCANCODE_W, AC_UP);
@@ -246,9 +251,17 @@ void Init(Settings* settings)
   Input_BindKey(SDL_SCANCODE_D, AC_RIGHT);
   Input_BindKey(SDL_SCANCODE_R, AC_WAIT);
   Input_BindKey(SDL_SCANCODE_SPACE, AC_USE);
+  Input_BindKey(SDL_SCANCODE_1, AC_CHEAT);
+
+  for(u32 i=0;i < TILESET_COUNT;i++)
+  {
+    char s[30];
+    sprintf(s, "tileset%i.png", i + 1);
+    Palette_LoadFromBitmap(s, &settings->palette);
+    Bitmap_Load24(s, &SPRITESHEET_TILESET[i], 0xFF, 0x00, 0xFF);
+  }
 
   Font_Load("NeoSans.png", &FONT_NEOSANS, Colour_Make(0,0,255), Colour_Make(255,0,255));
-  Bitmap_Load("Tileset.png", &SPRITESHEET_TILESET, 3);
 
   Sound_Load(&SOUND_HURT1,   "hurt1.wav");
   Sound_Load(&SOUND_HURT2,   "hurt2.wav");
@@ -291,7 +304,7 @@ void Section_Draw(int index)
 
       u32 sx = (s % 10);
       u32 sy = (s / 10);
-      Tile_Draw(&SPRITESHEET_TILESET, x * TILE_SIZE, y * TILE_SIZE, sx, sy);
+      Tile_Draw(&SPRITESHEET_TILESET[(SECTION_ID) % TILESET_COUNT], x * TILE_SIZE, y * TILE_SIZE, sx, sy);
     }
   }
 
@@ -333,7 +346,7 @@ typedef struct
   u8     held;
   bool   keyDropped;
   u32    level;
-  u32    score;
+  u8     win;
 } Game;
 
 Game*      GAME;
@@ -376,9 +389,10 @@ Bitmap* Object_GetBitmap(u8 type)
     case OT_Potion_Slow:    
     case OT_Potion_Wall:    
     case OT_Potion_Harming:    
-    case OT_Door:           
     case OT_Key:
-                        return &SPRITESHEET_TILESET;
+                        return &SPRITESHEET_TILESET[(SECTION_ID + 1) % TILESET_COUNT];
+    case OT_Door:           
+                        return &SPRITESHEET_TILESET[(SECTION_ID) % TILESET_COUNT];
   }
   return NULL;
 }
@@ -424,6 +438,19 @@ u32 Object_MoveSpeed(u8 type)
   return UINT32_MAX;
 }
 
+s32 Object_Animation(u8 type)
+{
+  switch(type)
+  {
+    case OT_FireDragon: 
+    case OT_WaterDragon:
+    case OT_EarthDragon:
+    case OT_AirDragon:   return (AnimationTimer % 2) == 0 ? 0 : 1;
+  }
+  return 0;
+}
+
+
 u32 Object_MaxActionTime(u8 type)
 {
   switch(type)
@@ -442,15 +469,7 @@ void Object_Draw(Object* object)
 
   XY xy;
   Object_GetSpriteTileIndex(object->type, &xy);
-  Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE,  xy.x, xy.y);
-#if 0
-  Rect r;
-  r.left = object->x * TILE_SIZE;
-  r.top  = object->y * TILE_SIZE;
-  r.right = r.left + TILE_SIZE;
-  r.bottom = r.top + TILE_SIZE;
-  Canvas_DrawRectangle(4, r);
-#endif 0
+  Tile_Draw(bitmap, object->x * TILE_SIZE, object->y * TILE_SIZE + Object_Animation(object->type),  xy.x, xy.y);
 
 }
 
@@ -555,8 +574,12 @@ u32 Object_CountDragon()
 
 void Object_PickupPotion(Object* object)
 {
-  GAME->potion = object->type;
-  object->type = OT_UsedObject;
+  if (GAME->potion == 0)
+  {
+    GAME->potion = object->type;
+    object->type = OT_UsedObject;
+    Sound_Play(&SOUND_SELECT, RETRO_SOUND_DEFAULT_VOLUME);
+  }
 }
 
 void Game_KeySpawnChance(u32 x, u32 y)
@@ -578,11 +601,24 @@ void Game_KeySpawnChance(u32 x, u32 y)
     }
   }
 }
+
 void RestartLevel();
+
+void NextLevel()
+{
+  logText("Win!");
+  GAME->level++;
+  if (GAME->level == SECTION_DATA_COUNT)
+  {
+    Scope_Push('WIN');
+  }
+
+  RestartLevel();
+}
 
 bool Object_Tick(Object* object)
 {
-  bool canMove = false;
+  bool canMove = false, win = false;
   bool isPlayer = (object == &GAME->player);
 
   if (object->moveTime == 0)
@@ -638,37 +674,29 @@ bool Object_Tick(Object* object)
               case OT_Potion_Slow:
                 logText("Picked up Splash Potion of Slowness");
                 Object_PickupPotion(other);
-                Sound_Play(&SOUND_SELECT, RETRO_SOUND_DEFAULT_VOLUME);
               break;
               case OT_Potion_Wall:
                 logText("Picked up Splash Potion of Wall Making");
                 Object_PickupPotion(other);
-                Sound_Play(&SOUND_SELECT, RETRO_SOUND_DEFAULT_VOLUME);
               break;
               case OT_Key:
                 other->type = OT_UsedObject;
                 GAME->held  = OT_Key;
               break;
               case OT_Door:
+                canMove = false;
+                
                 if (GAME->held == OT_Key)
                 {
-                  logText("Win!");
-                  GAME->level++;
-                  if (GAME->level == SECTION_DATA_COUNT)
-                  {
-                    GAME->score++;
-                    Scope_Push('WIN');
-                  }
-
-                  RestartLevel();
+                  GAME->win = true;
                 }
-                else
-                  canMove = false;
               break;
             }
           }
           else if (!otherIsPlayer)
+          {
             canMove = false;
+          }
         }
       }
     }
@@ -715,6 +743,7 @@ bool Object_Tick(Object* object)
   object->dX = 0;
   object->dY = 0;
 
+
   return canMove;
 }
 
@@ -732,11 +761,13 @@ bool Object_Tick(Object* object)
 
 void RestartLevel()
 {
-  u32 score = GAME->score;
   u32 level = GAME->level;
   memset(GAME, 0, sizeof(Game));
-  GAME->score = score;
   GAME->level = level;
+  SECTION_ID = GAME->level;
+  GAME->win = false;
+
+  Canvas_SetFlags(0, CNF_Render | CNF_Clear, (SECTION_ID * 5) + 1);
 
   u32 sectionId = GAME->level;
   memcpy(SECTION, &SECTION_DATA[sectionId],sizeof(SectionData));
@@ -767,7 +798,9 @@ void RestartLevel()
 
   s32 x, y, capacity, tries;
 
-  SPAWN_BEGIN(6, 80)
+
+
+  SPAWN_BEGIN(6, 6 + (GAME->level * 10))
   {
     Object_New(OT_Egg, x, y);
   }
@@ -787,7 +820,6 @@ void Start()
   GAME = Scope_New(Game);
   GAME->level = SECTION_START;
   SECTION = Scope_New(SectionData);
-  Canvas_SetFlags(0, CNF_Render | CNF_Clear, 0);
   Scope_Push('LEVL');
   RestartLevel();
   Music_Play("dragon2.mod");
@@ -797,8 +829,21 @@ void Step()
 {
   if (Scope_GetName() == 'WIN')
   {
-    Canvas_PrintF(10, 10, &FONT_NEOSANS, 4, "Score: %08X", GAME->score);
-    Canvas_PrintF(10, 20, &FONT_NEOSANS, 4, "Press <USE> to play again");
+    Canvas_SetFlags(0, CNF_Render | CNF_Clear, 0);
+
+    u32 x = (RETRO_CANVAS_DEFAULT_WIDTH / 2) - 100;
+    u32 y = (RETRO_CANVAS_DEFAULT_HEIGHT / 2) - 40;
+
+    Canvas_PrintF(x, y, &FONT_NEOSANS, 3, "Well done you escaped!");
+    Canvas_PrintF(x, y + 10, &FONT_NEOSANS, 3, "Press <USE> to play again");
+    
+    XY xy;
+    Object_GetSpriteTileIndex(OT_Human, &xy);
+    Bitmap* bitmap = Object_GetBitmap(OT_Human);
+    if (bitmap != NULL)
+    {
+      Tile_Draw(bitmap, x - 16, y, xy.x, xy.y);
+    }
 
     if (Input_GetActionReleased(AC_USE))
     {
@@ -812,7 +857,11 @@ void Step()
   bool move = false;
   bool wait = false;
 
-  if (Input_GetActionReleased(AC_UP))
+  if (Input_GetActionReleased(AC_CHEAT))
+  {
+    NextLevel();
+  }
+  else if (Input_GetActionReleased(AC_UP))
   {
     GAME->player.dY = -1;
     move = true;
@@ -822,8 +871,7 @@ void Step()
     GAME->player.dY = 1;
     move = true;
   }
-  
-  if (Input_GetActionReleased(AC_LEFT))
+  else if (Input_GetActionReleased(AC_LEFT))
   {
     GAME->player.dX = -1;
     move = true;
@@ -833,16 +881,14 @@ void Step()
     GAME->player.dX = 1;
     move = true;
   }
-
-  if (Input_GetActionReleased(AC_WAIT))
+  else if (Input_GetActionReleased(AC_WAIT))
   {
     GAME->player.dX = 0;
     GAME->player.dY = 0;
     move = true;
     wait = true;
   }
-
-  if (Input_GetActionReleased(AC_USE) && GAME->potion != 0)
+  else if (Input_GetActionReleased(AC_USE) && GAME->potion != 0)
   {
     GAME->player.dX = 0;
     GAME->player.dY = 0;
@@ -944,14 +990,21 @@ void Step()
     }
   }
 
+  if (GAME->win)
+  {
+    NextLevel();
+    return;
+  }
+
   FrameCount++;
-  AnimationTimer += (FrameCount % 10 == 0 ? 1 : 0);
-  Object_Draw(&GAME->player);
+  AnimationTimer += (FrameCount % 4 == 0 ? 1 : 0);
 
   for(u32 i=0; i < GAME->nbObjects;i++)
   {
     Object_Draw(&GAME->objects[i]);
   }
+
+  Object_Draw(&GAME->player);
 
   if (GAME->potion != 0)
   {
@@ -974,6 +1027,6 @@ void Step()
       Tile_Draw(bitmap, 16, 0,  xy.x, xy.y);
     }
   }
-  Canvas_PrintF(4, Canvas_GetHeight() - 12, &FONT_NEOSANS, 15, "> %s", LOG_TEXT);
+  Canvas_PrintF(4, Canvas_GetHeight() - 12, &FONT_NEOSANS, (SECTION_ID * 5) + 3, "> %s", LOG_TEXT);
 
 }
