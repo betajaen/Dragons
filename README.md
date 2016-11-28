@@ -1,4 +1,4 @@
-![Screenshot](https://betajaen.github.io/dragons/screenshot1.png)
+![Screenshot](https://raw.githubusercontent.com/betajaen/Dragons/master/screenshot1.png)
 
 ## About
 
