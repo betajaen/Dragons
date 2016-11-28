@@ -2,7 +2,7 @@
 
 ## About
 
-This is my entry for the [Pembroke Dock Game Jam November 2016](pdgamejam.wales); Dragons are Hatching. This is a turn-based game, similar to the [Doctor Who game for the Amiga](http://www.mobygames.com/game/doctor-who).
+This is my entry for the [Pembroke Dock Game Jam November 2016](http://pdgamejam.wales); Dragons are Hatching. This is a turn-based game, similar to the [Doctor Who game for the Amiga](http://www.mobygames.com/game/doctor-who).
 
 ## Description
 
