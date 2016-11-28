@@ -1,4 +1,12 @@
-#include "retro.h"
+
+#define RETRO_WINDOW_CAPTION "Dragons are Hatching From Eggs And You Have To Escape!"
+#define RETRO_ARENA_SIZE Kilobytes(64)
+#define RETRO_WINDOW_DEFAULT_WIDTH 1280
+#define RETRO_WINDOW_DEFAULT_HEIGHT 560
+#define RETRO_CANVAS_DEFAULT_WIDTH (RETRO_WINDOW_DEFAULT_WIDTH / 2)
+#define RETRO_CANVAS_DEFAULT_HEIGHT (RETRO_WINDOW_DEFAULT_HEIGHT / 2)
+
+#include "retro.c"
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
@@ -729,7 +737,7 @@ bool Object_Tick(Object* object)
           case OT_FireDragon:  logText("A Fire Dragon has hatched!");  break;
           case OT_WaterDragon: logText("A Water Dragon has hatched!"); break;
           case OT_AirDragon:   logText("A Air Dragon has hatched!");   break;
-          case OT_EarthDragon: logText("A Earh Dragon has hatched!");  break;
+          case OT_EarthDragon: logText("A Earth Dragon has hatched!");  break;
         }
       break;
     }

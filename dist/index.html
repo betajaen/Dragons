@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Cats</title>
+    <style>
+      body { 
+        background-color: rgb(20,12,28); 
+        color: white; 
+        font-family: sans-serif;  
+      }
+      
+      canvas.emscripten { 
+      border: 0px none; 
+      padding: 0;
+      margin: auto;
+      display: block;
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+        
+      }
+    </style>
+  </head>
+  <body>
+
+    <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>    
+    <script type='text/javascript'>
+      var statusElement = document.getElementById('status');
+      var progressElement = document.getElementById('progress');
+      var Module = {
+        preRun: [],
+        postRun: [],
+        print: function(text) { console.log(text); },
+        printErr: function(text) { console.log(text); },
+        canvas: document.getElementById('canvas'),
+        setStatus: function(text) { console.log(text); },
+        totalDependencies: 0,
+        monitorRunDependencies: function(left) {
+          this.totalDependencies = Math.max(this.totalDependencies, left);
+          Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+        }
+      };
+      Module.setStatus('Downloading...');
+      window.onerror = function() {
+        Module.setStatus('Exception thrown, see JavaScript console');
+        Module.setStatus = function(text) {
+          if (text) Module.printErr('[post-exception status] ' + text);
+        };
+      };
+    </script>
+    <script>
+
+        (function() {
+          var memoryInitializer = 'game.html.mem';
+          if (typeof Module['locateFile'] === 'function') {
+            memoryInitializer = Module['locateFile'](memoryInitializer);
+          } else if (Module['memoryInitializerPrefixURL']) {
+            memoryInitializer = Module['memoryInitializerPrefixURL'] + memoryInitializer;
+          }
+          var xhr = Module['memoryInitializerRequest'] = new XMLHttpRequest();
+          xhr.open('GET', memoryInitializer, true);
+          xhr.responseType = 'arraybuffer';
+          xhr.send(null);
+        })();
+
+        var script = document.createElement('script');
+        script.src = "game.js";
+        document.body.appendChild(script);
+
+</script>
+ <script>  
+window.onload = function () { window.focus(); }
+window.onclick = function () { window.focus(); }
+ </script>  
+  </body>
+</html>
